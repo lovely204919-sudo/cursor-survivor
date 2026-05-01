@@ -106,7 +106,7 @@ function spawnEnemy() {
   let x,y;
   if(edge===0){x=rand(0,W);y=-24;} else if(edge===1){x=W+24;y=rand(0,H);}
   else if(edge===2){x=rand(0,W);y=H+24;} else {x=-24;y=rand(0,H);}
-  const spd=rand(0.3+lv*0.12,0.7+lv*0.2), r=rand(9,Math.max(9,19-lv*0.5));
+  const spd=rand(0.18+lv*0.09, 0.42+lv*0.13), r=rand(9,Math.max(9,19-lv*0.5));
   const dx=S.cursor.x-x,dy=S.cursor.y-y,dist=Math.hypot(dx,dy)||1;
   const types=['plasma','void','solar'];
   return { x,y, vx:(dx/dist)*spd, vy:(dy/dist)*spd, r, homing:Math.random()<0.08+lv*0.04, type:types[Math.floor(Math.random()*3)], pulse:rand(0,Math.PI*2) };
@@ -127,25 +127,25 @@ function update() {
   S.frame++;
   if(S.phase==='running') S.time++;
 
-  // 레벨업: 5초마다 (300프레임)
-  const newLevel=Math.floor(S.time/300);
-  if(newLevel!==S.level){ S.level=newLevel; S.bpm=Math.min(200,80+S.level*12); setBPM(S.bpm); S.hue=(180+S.level*30)%360; S.shakeX=8; S.shakeY=8; }
+  // 레벨업: 8초마다 (480프레임)
+  const newLevel=Math.floor(S.time/480);
+  if(newLevel!==S.level){ S.level=newLevel; S.bpm=Math.min(180,80+S.level*10); setBPM(S.bpm); S.hue=(180+S.level*30)%360; S.shakeX=8; S.shakeY=8; }
   S.shakeX=lerp(S.shakeX,0,0.2); S.shakeY=lerp(S.shakeY,0,0.2);
   if(S.beatFlash>0) S.beatFlash--;
 
-  // 비트에 맞춰 스폰 — 레벨마다 급증
+  // 비트에 맞춰 스폰
   if(S.spawnOnBeat){
     S.spawnOnBeat=false;
-    const count=2+S.level*2;
+    const count=1+S.level;
     for(let i=0;i<count;i++) S.enemies.push(spawnEnemy());
   }
 
-  // 비트 사이 트리클 스폰 (시간 지날수록 더 자주)
+  // 비트 사이 트리클 스폰
   S.trickleTimer++;
-  const trickleInterval=Math.max(20, 90-S.level*10);
+  const trickleInterval=Math.max(30, 120-S.level*10);
   if(S.trickleTimer>=trickleInterval){
     S.trickleTimer=0;
-    const count=1+Math.floor(S.level/2);
+    const count=1+Math.floor(S.level/3);
     for(let i=0;i<count;i++) S.enemies.push(spawnEnemy());
   }
   S.trail.unshift({x:S.cursor.x,y:S.cursor.y,t:1}); if(S.trail.length>28) S.trail.pop();
