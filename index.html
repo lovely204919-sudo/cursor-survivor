@@ -124,7 +124,8 @@ function startGame() {
 function update() {
   const dt=S.slowmo>0?0.25:1;
   if(S.slowmo>0) S.slowmo--;
-  S.frame++; S.time++;
+  S.frame++;
+  if(S.phase==='running') S.time++;
 
   // 레벨업: 5초마다 (300프레임)
   const newLevel=Math.floor(S.time/300);
