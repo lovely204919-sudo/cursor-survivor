@@ -176,12 +176,15 @@ function drawBackground() {
 }
 
 function drawEnemy(e) {
-  const prox=Math.max(0,1-Math.hypot(S.cursor.x-e.x,S.cursor.y-e.y)/200), beat=S.beatFlash>0, ps=1+Math.sin(e.pulse)*0.12+(beat?0.18:0);
+  const prox=Math.max(0,1-Math.hypot(S.cursor.x-e.x,S.cursor.y-e.y)/200), beat=S.beatFlash>0, ps=Math.max(0.01,1+Math.sin(e.pulse)*0.12+(beat?0.18:0));
   const colors={plasma:{h:S.hue+20,s:100,l:60},void:{h:(S.hue+180)%360,s:80,l:50},solar:{h:30,s:100,l:60}};
   const c=colors[e.type]||colors.plasma;
-  const aura=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.r*4); aura.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,${0.08+prox*0.18})`); aura.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*4*ps,0,Math.PI*2); ctx.fillStyle=aura; ctx.fill();
-  const mid=ctx.createRadialGradient(e.x,e.y,e.r*0.2,e.x,e.y,e.r*1.8); mid.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,0)`); mid.addColorStop(0.6,`hsla(${c.h},${c.s}%,${c.l}%,${0.1+prox*0.15})`); mid.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*1.8*ps,0,Math.PI*2); ctx.fillStyle=mid; ctx.fill();
-  const core=ctx.createRadialGradient(e.x-e.r*.25,e.y-e.r*.25,0,e.x,e.y,e.r*ps); core.addColorStop(0,`hsla(${c.h+30},100%,95%,1)`); core.addColorStop(0.4,`hsla(${c.h},${c.s}%,${c.l+15}%,1)`); core.addColorStop(1,`hsla(${c.h-20},${c.s}%,${c.l-10}%,0.9)`); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*ps,0,Math.PI*2); ctx.fillStyle=core; ctx.fill();
+  const auraR=Math.max(0.01,e.r*4*ps);
+  const aura=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,auraR); aura.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,${0.08+prox*0.18})`); aura.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,auraR,0,Math.PI*2); ctx.fillStyle=aura; ctx.fill();
+  const midR=Math.max(0.01,e.r*1.8*ps);
+  const mid=ctx.createRadialGradient(e.x,e.y,Math.max(0.01,e.r*0.2),e.x,e.y,midR); mid.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,0)`); mid.addColorStop(0.6,`hsla(${c.h},${c.s}%,${c.l}%,${0.1+prox*0.15})`); mid.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,midR,0,Math.PI*2); ctx.fillStyle=mid; ctx.fill();
+  const coreR=Math.max(0.01,e.r*ps);
+  const core=ctx.createRadialGradient(e.x-e.r*.25,e.y-e.r*.25,0,e.x,e.y,coreR); core.addColorStop(0,`hsla(${c.h+30},100%,95%,1)`); core.addColorStop(0.4,`hsla(${c.h},${c.s}%,${c.l+15}%,1)`); core.addColorStop(1,`hsla(${c.h-20},${c.s}%,${c.l-10}%,0.9)`); ctx.beginPath(); ctx.arc(e.x,e.y,coreR,0,Math.PI*2); ctx.fillStyle=core; ctx.fill();
   if(e.homing){ ctx.beginPath(); ctx.arc(e.x,e.y,(e.r+4)*ps,0,Math.PI*2); ctx.strokeStyle=`hsla(50,100%,70%,${0.5+Math.sin(e.pulse*2)*0.3})`; ctx.lineWidth=1.5; ctx.stroke(); const ox=e.x+Math.cos(e.pulse*2)*(e.r+8),oy=e.y+Math.sin(e.pulse*2)*(e.r+8); ctx.beginPath(); ctx.arc(ox,oy,2,0,Math.PI*2); ctx.fillStyle='rgba(255,220,80,0.9)'; ctx.fill(); }
   if(prox>0.5){ for(let i=0;i<3;i++){ const a=e.pulse*3+i*(Math.PI*2/3),d=e.r*1.4+Math.sin(e.pulse*4+i)*4,sx=e.x+Math.cos(a)*d,sy=e.y+Math.sin(a)*d; ctx.beginPath(); ctx.arc(sx,sy,1.5,0,Math.PI*2); ctx.fillStyle=`hsla(${c.h},100%,80%,${prox*0.8})`; ctx.fill(); } }
 }
@@ -201,9 +204,19 @@ function drawCursor() {
 
 function drawParticles() {
   for(const p of S.particles){
-    const a=p.life/p.max;
-    if(p.type==='ring'){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*(2-a),0,Math.PI*2); ctx.strokeStyle=`hsla(${p.hue},100%,70%,${a*0.8})`; ctx.lineWidth=1.5; ctx.stroke(); }
-    else { const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*a*2); g.addColorStop(0,`hsla(${p.hue},100%,90%,${a})`); g.addColorStop(1,`hsla(${p.hue},100%,60%,0)`); ctx.beginPath(); ctx.arc(p.x,p.y,p.r*a*2,0,Math.PI*2); ctx.fillStyle=g; ctx.fill(); }
+    const a=Math.max(0, p.life/p.max);
+    if(p.type==='ring'){
+      const r=Math.max(0.01, p.r*(2-a));
+      ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
+      ctx.strokeStyle=`hsla(${p.hue},100%,70%,${a*0.8})`; ctx.lineWidth=1.5; ctx.stroke();
+    } else {
+      const r=Math.max(0.01, p.r*a*2);
+      const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r);
+      g.addColorStop(0,`hsla(${p.hue},100%,90%,${a})`);
+      g.addColorStop(1,`hsla(${p.hue},100%,60%,0)`);
+      ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+    }
   }
 }
 
