@@ -114,7 +114,8 @@ function spawnEnemy() {
 
 function startGame() {
   S.phase='running'; S.enemies=[]; S.particles=[]; S.trail=[];
-  S.frame=0; S.time=0; S.level=0; S.bpm=80;
+  S.frame=0; S.time=0; S.startTs=performance.now(); S.elapsed=0;
+  S.level=0; S.bpm=80;
   S.beatFlash=0; S.spawnOnBeat=false; S.slowmo=0; S.hue=180;
   S.cursor.x=W/2; S.cursor.y=H/2; S.shakeX=0; S.shakeY=0;
   S.trickleTimer=0;
@@ -125,11 +126,15 @@ function update() {
   const dt=S.slowmo>0?0.25:1;
   if(S.slowmo>0) S.slowmo--;
   S.frame++;
-  if(S.phase==='running') S.time++;
 
-  // 레벨업: 8초마다 (480프레임)
-  const newLevel=Math.floor(S.time/480);
-  if(newLevel!==S.level){ S.level=newLevel; S.bpm=Math.min(180,80+S.level*10); setBPM(S.bpm); S.hue=(180+S.level*30)%360; S.shakeX=8; S.shakeY=8; }
+  // 실제 경과 시간 (초) — 슬로우모션 중엔 멈춤
+  if(S.phase==='running') {
+    S.elapsed = (performance.now() - S.startTs) / 1000;
+  }
+
+  // 레벨업: 8초마다
+  const newLevel=Math.floor(S.elapsed/8);
+  if(newLevel!==S.level){ S.level=newLevel; S.bpm=Math.min(200,80+S.level*10); setBPM(S.bpm); S.hue=(180+S.level*30)%360; S.shakeX=8; S.shakeY=8; }
   S.shakeX=lerp(S.shakeX,0,0.2); S.shakeY=lerp(S.shakeY,0,0.2);
   if(S.beatFlash>0) S.beatFlash--;
 
@@ -159,7 +164,7 @@ function update() {
   for(const n of S.nebulaParticles){ n.x+=n.vx; n.y+=n.vy; if(n.x<-150)n.x=W+150; if(n.x>W+150)n.x=-150; if(n.y<-150)n.y=H+150; if(n.y>H+150)n.y=-150; }
   for(const e of S.enemies){
     if(Math.hypot(S.cursor.x-e.x,S.cursor.y-e.y)<e.r+6){
-      S.phase='dead'; stopBeat(); if(S.time>S.bestTime) S.bestTime=S.time; S.slowmo=40;
+      S.phase='dead'; stopBeat(); if(S.elapsed>S.bestTime) S.bestTime=S.elapsed; S.slowmo=40;
       for(let i=0;i<60;i++){ const a=Math.random()*Math.PI*2,spd=rand(1,12); S.particles.push({x:S.cursor.x,y:S.cursor.y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:rand(40,90),max:90,r:rand(2,8),hue:rand(S.hue-40,S.hue+40),type:'burst'}); }
       for(let i=0;i<24;i++){ const a=(i/24)*Math.PI*2,spd=rand(5,9); S.particles.push({x:S.cursor.x,y:S.cursor.y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:30,max:30,r:4,hue:60,type:'ring'}); }
       break;
@@ -222,7 +227,7 @@ function drawParticles() {
 }
 
 function drawHUD() {
-  const secs=(S.time/60).toFixed(2),bSecs=(S.bestTime/60).toFixed(2),onB=S.beatFlash>0;
+  const secs=S.elapsed.toFixed(2), bSecs=S.bestTime.toFixed(2), onB=S.beatFlash>0;
   ctx.save(); ctx.shadowColor=`hsla(${S.hue},100%,70%,0.8)`; ctx.shadowBlur=12; ctx.textAlign='left'; ctx.font='bold 24px "Press Start 2P",monospace'; ctx.fillStyle=`hsl(${S.hue},100%,75%)`; ctx.fillText(secs+'s',20,44); ctx.restore();
   ctx.textAlign='left'; ctx.font='8px "Press Start 2P",monospace'; ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.fillText('BEST '+bSecs+'s',20,62);
   ctx.save(); if(onB){ctx.shadowColor=`hsl(${S.hue},100%,70%)`;ctx.shadowBlur=16;} ctx.textAlign='center'; ctx.font=(onB?'11px':'9px')+' "Press Start 2P",monospace'; ctx.fillStyle=onB?`hsl(${S.hue},100%,80%)`:S.level>=5?'#ff6644':S.level>=3?'#ffaa44':'rgba(255,255,255,0.4)'; ctx.fillText('♩ '+S.bpm+' BPM',W/2,26); ctx.restore();
@@ -243,10 +248,10 @@ function drawDead() {
   ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H);
   ctx.save(); ctx.textAlign='center';
   ctx.shadowColor='#ff2200'; ctx.shadowBlur=40; ctx.font='bold 72px "Fredoka One",cursive'; ctx.fillStyle='#ff4422'; ctx.fillText('DEAD 💀',W/2,H/2-48); ctx.shadowBlur=0;
-  ctx.shadowColor=`hsl(${S.hue},100%,70%)`; ctx.shadowBlur=16; ctx.font='20px "Press Start 2P",monospace'; ctx.fillStyle='white'; ctx.fillText((S.time/60).toFixed(2)+'s',W/2,H/2+8); ctx.shadowBlur=0;
+  ctx.shadowColor=`hsl(${S.hue},100%,70%)`; ctx.shadowBlur=16; ctx.font='20px "Press Start 2P",monospace'; ctx.fillStyle='white'; ctx.fillText(S.elapsed.toFixed(2)+'s',W/2,H/2+8); ctx.shadowBlur=0;
   ctx.font='9px "Press Start 2P",monospace';
-  if(S.time>=S.bestTime&&S.bestTime>0){ ctx.shadowColor='#ffdd00'; ctx.shadowBlur=12; ctx.fillStyle='#ffdd44'; ctx.fillText('★ NEW BEST! ★',W/2,H/2+36); ctx.shadowBlur=0; }
-  else { ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.fillText('BEST: '+(S.bestTime/60).toFixed(2)+'s',W/2,H/2+36); }
+  if(S.elapsed>=S.bestTime&&S.bestTime>0){ ctx.shadowColor='#ffdd00'; ctx.shadowBlur=12; ctx.fillStyle='#ffdd44'; ctx.fillText('★ NEW BEST! ★',W/2,H/2+36); ctx.shadowBlur=0; }
+  else { ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.fillText('BEST: '+S.bestTime.toFixed(2)+'s',W/2,H/2+36); }
   const bx=W/2,by=H/2+76; ctx.shadowColor='rgba(255,255,255,0.4)'; ctx.shadowBlur=12; ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillRect(bx-90,by-20,180,40); ctx.shadowBlur=0; ctx.font='10px "Press Start 2P",monospace'; ctx.fillStyle='#111'; ctx.fillText('↺  RETRY',bx,by+4);
   ctx.restore();
 }
