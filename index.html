@@ -258,8 +258,22 @@ function drawDead() {
 
 canvas.addEventListener('mousemove',e=>{S.cursor.x=e.clientX;S.cursor.y=e.clientY;});
 canvas.addEventListener('touchmove',e=>{e.preventDefault();S.cursor.x=e.touches[0].clientX;S.cursor.y=e.touches[0].clientY;},{passive:false});
-canvas.addEventListener('click',()=>{if(S.phase!=='running')startGame();});
-canvas.addEventListener('touchstart',e=>{e.preventDefault();S.cursor.x=e.touches[0].clientX;S.cursor.y=e.touches[0].clientY;if(S.phase!=='running')startGame();},{passive:false});
+canvas.addEventListener('click', async ()=>{
+  if(S.phase!=='running'){
+    if(!audioCtx) initAudio();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    startGame();
+  }
+});
+canvas.addEventListener('touchstart', async e=>{
+  e.preventDefault();
+  S.cursor.x=e.touches[0].clientX; S.cursor.y=e.touches[0].clientY;
+  if(S.phase!=='running'){
+    if(!audioCtx) initAudio();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    startGame();
+  }
+},{passive:false});
 
 S.cursor.x=window.innerWidth/2; S.cursor.y=window.innerHeight/2;
 
