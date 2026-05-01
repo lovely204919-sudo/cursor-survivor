@@ -6,411 +6,271 @@
 <title>Cursor Survivor</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Fredoka+One&display=swap" rel="stylesheet">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #080808; cursor: none; }
-  canvas { display: block; width: 100vw; height: 100vh; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }
+  canvas { display:block; width:100vw; height:100vh; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
-// ── Setup ─────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-
 let W, H;
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
 resize();
 window.addEventListener('resize', resize);
 
-// ── State ─────────────────────────────────────────────────────
+const rand = (a,b) => a + Math.random()*(b-a);
+const lerp = (a,b,t) => a+(b-a)*t;
+
 const S = {
-  phase: 'idle',   // idle | running | dead
-  cursor: { x: 0, y: 0 },
+  phase: 'idle',
+  cursor: { x:0, y:0 },
+  trail: [],
   enemies: [], particles: [],
+  nebulaParticles: [], stars: [],
   frame: 0, time: 0, bestTime: 0,
   level: 0, bpm: 80,
-  beatFlash: 0,
-  spawnOnBeat: false,
+  beatFlash: 0, spawnOnBeat: false,
+  shakeX: 0, shakeY: 0,
+  slowmo: 0, hue: 180,
 };
 
-// ── Input ─────────────────────────────────────────────────────
-canvas.addEventListener('mousemove', e => {
-  S.cursor.x = e.clientX;
-  S.cursor.y = e.clientY;
-});
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  S.cursor.x = e.touches[0].clientX;
-  S.cursor.y = e.touches[0].clientY;
-}, { passive: false });
-canvas.addEventListener('click', () => {
-  if (S.phase !== 'running') startGame();
-});
-canvas.addEventListener('touchstart', e => {
-  e.preventDefault();
-  S.cursor.x = e.touches[0].clientX;
-  S.cursor.y = e.touches[0].clientY;
-  if (S.phase !== 'running') startGame();
-}, { passive: false });
+function initStars() {
+  S.stars = [];
+  for (let i=0; i<120; i++)
+    S.stars.push({ x:rand(0,W), y:rand(0,H), r:rand(0.3,1.8), twinkle:rand(0,Math.PI*2), speed:rand(0.003,0.012) });
+}
+initStars();
 
-// ── Audio ─────────────────────────────────────────────────────
-let audioCtx = null, masterGain = null;
-let nextBeatTime = 0, beatInterval = 0;
-let beatScheduler = null, audioRunning = false;
+function initNebula() {
+  S.nebulaParticles = [];
+  for (let i=0; i<60; i++)
+    S.nebulaParticles.push({ x:rand(0,W), y:rand(0,H), vx:rand(-0.15,0.15), vy:rand(-0.12,0.12), r:rand(40,120), alpha:rand(0.01,0.04), hue:rand(200,320) });
+}
+initNebula();
 
+// Audio
+let audioCtx=null, masterGain=null, nextBeatTime=0, beatInterval=0, beatScheduler=null, audioRunning=false;
 function initAudio() {
   if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.45;
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = 0.45;
   masterGain.connect(audioCtx.destination);
 }
-
 function startBeat(bpm) {
-  initAudio();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  beatInterval = 60 / bpm;
-  nextBeatTime = audioCtx.currentTime + 0.1;
-  audioRunning = true;
-  scheduleBeat();
+  initAudio(); if (audioCtx.state==='suspended') audioCtx.resume();
+  beatInterval=60/bpm; nextBeatTime=audioCtx.currentTime+0.1; audioRunning=true; scheduleBeat();
 }
-
-function setBPM(bpm) {
-  beatInterval = 60 / bpm;
-}
-
-function stopBeat() {
-  audioRunning = false;
-  if (beatScheduler) clearTimeout(beatScheduler);
-}
-
+function setBPM(bpm) { beatInterval=60/bpm; }
+function stopBeat() { audioRunning=false; if(beatScheduler) clearTimeout(beatScheduler); }
 function scheduleBeat() {
   if (!audioRunning) return;
-  while (nextBeatTime < audioCtx.currentTime + 0.15) {
+  while (nextBeatTime < audioCtx.currentTime+0.15) {
     playBeat(nextBeatTime);
-    const delay = Math.max(0, (nextBeatTime - audioCtx.currentTime - 0.016) * 1000);
-    setTimeout(() => {
-      if (S.phase === 'running') {
-        S.beatFlash = 8;
-        S.spawnOnBeat = true;
-      }
-    }, delay);
-    nextBeatTime += beatInterval;
+    const delay=Math.max(0,(nextBeatTime-audioCtx.currentTime-0.016)*1000);
+    setTimeout(()=>{ if(S.phase==='running'){ S.beatFlash=8; S.spawnOnBeat=true; }}, delay);
+    nextBeatTime+=beatInterval;
   }
-  beatScheduler = setTimeout(scheduleBeat, 80);
+  beatScheduler=setTimeout(scheduleBeat,80);
 }
-
 function playBeat(t) {
-  const ac = audioCtx, mg = masterGain;
-
-  // Kick
-  const k = ac.createOscillator(), kg = ac.createGain();
+  const ac=audioCtx,mg=masterGain;
+  const k=ac.createOscillator(),kg=ac.createGain();
   k.connect(kg); kg.connect(mg);
-  k.frequency.setValueAtTime(150, t);
-  k.frequency.exponentialRampToValueAtTime(38, t + 0.1);
-  kg.gain.setValueAtTime(0.85, t);
-  kg.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-  k.start(t); k.stop(t + 0.25);
-
-  // Hi-hat x2
-  for (let i = 0; i < 2; i++) {
-    const ht = t + i * beatInterval * 0.5;
-    const buf = ac.createBuffer(1, ac.sampleRate * 0.05, ac.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let j = 0; j < d.length; j++) d[j] = Math.random() * 2 - 1;
-    const src = ac.createBufferSource(); src.buffer = buf;
-    const hpf = ac.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = 8000;
-    const hg = ac.createGain();
-    hg.gain.setValueAtTime(i === 0 ? 0.12 : 0.06, ht);
-    hg.gain.exponentialRampToValueAtTime(0.001, ht + 0.05);
+  k.frequency.setValueAtTime(150,t); k.frequency.exponentialRampToValueAtTime(38,t+0.1);
+  kg.gain.setValueAtTime(0.8,t); kg.gain.exponentialRampToValueAtTime(0.001,t+0.25);
+  k.start(t); k.stop(t+0.25);
+  for(let i=0;i<2;i++){
+    const ht=t+i*beatInterval*0.5;
+    const buf=ac.createBuffer(1,ac.sampleRate*0.05,ac.sampleRate);
+    const d=buf.getChannelData(0); for(let j=0;j<d.length;j++) d[j]=Math.random()*2-1;
+    const src=ac.createBufferSource(); src.buffer=buf;
+    const hpf=ac.createBiquadFilter(); hpf.type='highpass'; hpf.frequency.value=8000;
+    const hg=ac.createGain();
+    hg.gain.setValueAtTime(i===0?0.1:0.05,ht); hg.gain.exponentialRampToValueAtTime(0.001,ht+0.05);
     src.connect(hpf); hpf.connect(hg); hg.connect(mg);
-    src.start(ht); src.stop(ht + 0.06);
+    src.start(ht); src.stop(ht+0.06);
   }
-
-  // Bass
-  const bassFreq = Math.random() > 0.5 ? 55 : 82;
-  const b = ac.createOscillator(), bg = ac.createGain();
-  b.type = 'sawtooth'; b.frequency.value = bassFreq;
-  const lpf = ac.createBiquadFilter(); lpf.type = 'lowpass'; lpf.frequency.value = 200;
+  const b=ac.createOscillator(),bg=ac.createGain();
+  b.type='sawtooth'; b.frequency.value=Math.random()>0.5?55:82;
+  const lpf=ac.createBiquadFilter(); lpf.type='lowpass'; lpf.frequency.value=200;
   b.connect(lpf); lpf.connect(bg); bg.connect(mg);
-  bg.gain.setValueAtTime(0.38, t);
-  bg.gain.exponentialRampToValueAtTime(0.001, t + beatInterval * 0.65);
-  b.start(t); b.stop(t + beatInterval * 0.65);
+  bg.gain.setValueAtTime(0.35,t); bg.gain.exponentialRampToValueAtTime(0.001,t+beatInterval*0.65);
+  b.start(t); b.stop(t+beatInterval*0.65);
 }
-
-// ── Helpers ───────────────────────────────────────────────────
-function rand(a, b) { return a + Math.random() * (b - a); }
 
 function spawnEnemy() {
-  const lv = S.level;
-  const edge = Math.floor(Math.random() * 4);
-  let x, y;
-  if (edge === 0)      { x = rand(0, W); y = -20; }
-  else if (edge === 1) { x = W + 20;    y = rand(0, H); }
-  else if (edge === 2) { x = rand(0, W); y = H + 20; }
-  else                 { x = -20;        y = rand(0, H); }
-
-  const spd = rand(0.3 + lv * 0.12, 0.7 + lv * 0.2);
-  const r   = rand(9, Math.max(9, 19 - lv * 0.5));
-  const dx = S.cursor.x - x, dy = S.cursor.y - y;
-  const dist = Math.hypot(dx, dy) || 1;
-  return {
-    x, y,
-    vx: (dx / dist) * spd,
-    vy: (dy / dist) * spd,
-    r,
-    homing: Math.random() < 0.08 + lv * 0.04,
-  };
+  const lv=S.level,edge=Math.floor(Math.random()*4);
+  let x,y;
+  if(edge===0){x=rand(0,W);y=-24;} else if(edge===1){x=W+24;y=rand(0,H);}
+  else if(edge===2){x=rand(0,W);y=H+24;} else {x=-24;y=rand(0,H);}
+  const spd=rand(0.3+lv*0.12,0.7+lv*0.2), r=rand(9,Math.max(9,19-lv*0.5));
+  const dx=S.cursor.x-x,dy=S.cursor.y-y,dist=Math.hypot(dx,dy)||1;
+  const types=['plasma','void','solar'];
+  return { x,y, vx:(dx/dist)*spd, vy:(dy/dist)*spd, r, homing:Math.random()<0.08+lv*0.04, type:types[Math.floor(Math.random()*3)], pulse:rand(0,Math.PI*2) };
 }
 
-// ── Game Logic ────────────────────────────────────────────────
 function startGame() {
-  S.phase = 'running';
-  S.enemies = []; S.particles = [];
-  S.frame = 0; S.time = 0;
-  S.level = 0; S.bpm = 80;
-  S.beatFlash = 0; S.spawnOnBeat = false;
-  S.cursor.x = W / 2; S.cursor.y = H / 2;
+  S.phase='running'; S.enemies=[]; S.particles=[]; S.trail=[];
+  S.frame=0; S.time=0; S.level=0; S.bpm=80;
+  S.beatFlash=0; S.spawnOnBeat=false; S.slowmo=0; S.hue=180;
+  S.cursor.x=W/2; S.cursor.y=H/2; S.shakeX=0; S.shakeY=0;
+  S.trickleTimer=0;
   startBeat(80);
 }
 
 function update() {
-  S.frame++;
-  S.time++;
+  const dt=S.slowmo>0?0.25:1;
+  if(S.slowmo>0) S.slowmo--;
+  S.frame++; S.time++;
 
-  // Level up every 10s (600 frames @ 60fps)
-  const newLevel = Math.floor(S.time / 600);
-  if (newLevel !== S.level) {
-    S.level = newLevel;
-    S.bpm = Math.min(180, 80 + S.level * 10);
-    setBPM(S.bpm);
+  // 레벨업: 5초마다 (300프레임)
+  const newLevel=Math.floor(S.time/300);
+  if(newLevel!==S.level){ S.level=newLevel; S.bpm=Math.min(200,80+S.level*12); setBPM(S.bpm); S.hue=(180+S.level*30)%360; S.shakeX=8; S.shakeY=8; }
+  S.shakeX=lerp(S.shakeX,0,0.2); S.shakeY=lerp(S.shakeY,0,0.2);
+  if(S.beatFlash>0) S.beatFlash--;
+
+  // 비트에 맞춰 스폰 — 레벨마다 급증
+  if(S.spawnOnBeat){
+    S.spawnOnBeat=false;
+    const count=2+S.level*2;
+    for(let i=0;i<count;i++) S.enemies.push(spawnEnemy());
   }
 
-  // Spawn on beat
-  if (S.spawnOnBeat) {
-    S.spawnOnBeat = false;
-    const count = 1 + Math.floor(S.level / 2);
-    for (let i = 0; i < count; i++) S.enemies.push(spawnEnemy());
+  // 비트 사이 트리클 스폰 (시간 지날수록 더 자주)
+  S.trickleTimer++;
+  const trickleInterval=Math.max(20, 90-S.level*10);
+  if(S.trickleTimer>=trickleInterval){
+    S.trickleTimer=0;
+    const count=1+Math.floor(S.level/2);
+    for(let i=0;i<count;i++) S.enemies.push(spawnEnemy());
   }
-
-  // Update enemies
-  S.enemies = S.enemies.filter(e => e.x > -80 && e.x < W+80 && e.y > -80 && e.y < H+80);
-  for (const e of S.enemies) {
-    if (e.homing) {
-      const dx = S.cursor.x - e.x, dy = S.cursor.y - e.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const spd = Math.hypot(e.vx, e.vy);
-      e.vx += (dx/d)*0.07; e.vy += (dy/d)*0.07;
-      const ns = Math.hypot(e.vx, e.vy);
-      if (ns > spd * 1.6) { e.vx = e.vx/ns*spd*1.6; e.vy = e.vy/ns*spd*1.6; }
-    }
-    e.x += e.vx; e.y += e.vy;
+  S.trail.unshift({x:S.cursor.x,y:S.cursor.y,t:1}); if(S.trail.length>28) S.trail.pop();
+  S.trail.forEach(p=>p.t=Math.max(0,p.t-0.04));
+  S.enemies=S.enemies.filter(e=>e.x>-80&&e.x<W+80&&e.y>-80&&e.y<H+80);
+  for(const e of S.enemies){
+    e.pulse+=0.08*dt;
+    if(e.homing){ const dx=S.cursor.x-e.x,dy=S.cursor.y-e.y,d=Math.hypot(dx,dy)||1,spd=Math.hypot(e.vx,e.vy); e.vx+=(dx/d)*0.07*dt; e.vy+=(dy/d)*0.07*dt; const ns=Math.hypot(e.vx,e.vy); if(ns>spd*1.6){e.vx=e.vx/ns*spd*1.6;e.vy=e.vy/ns*spd*1.6;} }
+    e.x+=e.vx*dt; e.y+=e.vy*dt;
   }
-
-  // Collision
-  for (const e of S.enemies) {
-    if (Math.hypot(S.cursor.x - e.x, S.cursor.y - e.y) < e.r + 6) {
-      S.phase = 'dead';
-      stopBeat();
-      if (S.time > S.bestTime) S.bestTime = S.time;
-      for (let i = 0; i < 28; i++) {
-        const a = Math.random()*Math.PI*2, spd = rand(2, 9);
-        S.particles.push({
-          x: S.cursor.x, y: S.cursor.y,
-          vx: Math.cos(a)*spd, vy: Math.sin(a)*spd,
-          life: 55, max: 55, r: rand(3,7), hue: rand(0,40),
-        });
-      }
+  for(const n of S.nebulaParticles){ n.x+=n.vx; n.y+=n.vy; if(n.x<-150)n.x=W+150; if(n.x>W+150)n.x=-150; if(n.y<-150)n.y=H+150; if(n.y>H+150)n.y=-150; }
+  for(const e of S.enemies){
+    if(Math.hypot(S.cursor.x-e.x,S.cursor.y-e.y)<e.r+6){
+      S.phase='dead'; stopBeat(); if(S.time>S.bestTime) S.bestTime=S.time; S.slowmo=40;
+      for(let i=0;i<60;i++){ const a=Math.random()*Math.PI*2,spd=rand(1,12); S.particles.push({x:S.cursor.x,y:S.cursor.y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:rand(40,90),max:90,r:rand(2,8),hue:rand(S.hue-40,S.hue+40),type:'burst'}); }
+      for(let i=0;i<24;i++){ const a=(i/24)*Math.PI*2,spd=rand(5,9); S.particles.push({x:S.cursor.x,y:S.cursor.y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:30,max:30,r:4,hue:60,type:'ring'}); }
       break;
     }
   }
-
-  // Update particles
-  S.particles = S.particles.filter(p => p.life > 0);
-  for (const p of S.particles) {
-    p.x+=p.vx; p.y+=p.vy; p.vx*=.91; p.vy*=.91; p.life--;
-  }
-
-  if (S.beatFlash > 0) S.beatFlash--;
+  S.particles=S.particles.filter(p=>p.life>0);
+  for(const p of S.particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=0.91;p.vy*=0.91;p.life-=dt;}
 }
 
-// ── Draw ──────────────────────────────────────────────────────
-function draw() {
-  // Background
-  ctx.fillStyle = '#080808';
-  ctx.fillRect(0, 0, W, H);
+function drawBackground() {
+  ctx.fillStyle='#000005'; ctx.fillRect(0,0,W,H);
+  for(const n of S.nebulaParticles){ const g=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,n.r); g.addColorStop(0,`hsla(${n.hue},70%,50%,${n.alpha})`); g.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2); ctx.fillStyle=g; ctx.fill(); }
+  for(const s of S.stars){ s.twinkle+=s.speed; const a=0.4+Math.sin(s.twinkle)*0.4; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fillStyle=`rgba(255,255,255,${a})`; ctx.fill(); }
+  ctx.fillStyle='rgba(0,0,0,0.08)'; for(let y=0;y<H;y+=4) ctx.fillRect(0,y,W,1);
+}
 
-  // Beat flash
-  if (S.beatFlash > 0 && S.phase === 'running') {
-    ctx.fillStyle = `rgba(0,229,160,${(S.beatFlash/8)*0.1})`;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  // Grid
-  const ga = 0.025 + (S.beatFlash/8)*0.04;
-  ctx.strokeStyle = `rgba(255,255,255,${ga})`;
-  ctx.lineWidth = 1;
-  for (let x=0; x<W; x+=40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-  for (let y=0; y<H; y+=40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-
-  if (S.phase === 'idle')    { drawIdle(); return; }
-  if (S.phase === 'dead')    { drawDead(); return; }
-
-  // Enemies
-  for (const e of S.enemies) {
-    const prox = Math.max(0, 1 - Math.hypot(S.cursor.x-e.x, S.cursor.y-e.y)/180);
-    const pulse = S.beatFlash > 0 ? 1.15 : 1;
-
-    const g = ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.r*3);
-    g.addColorStop(0, `rgba(255,${(80+prox*40)|0},0,${0.12+prox*0.2})`);
-    g.addColorStop(1, 'rgba(255,50,0,0)');
-    ctx.beginPath(); ctx.arc(e.x,e.y,e.r*3*pulse,0,Math.PI*2);
-    ctx.fillStyle = g; ctx.fill();
-
-    ctx.beginPath(); ctx.arc(e.x,e.y,e.r*pulse,0,Math.PI*2);
-    const bg = ctx.createRadialGradient(e.x-e.r*.3,e.y-e.r*.3,0,e.x,e.y,e.r);
-    bg.addColorStop(0, `rgb(255,${(130-prox*80)|0},${(40-prox*30)|0})`);
-    bg.addColorStop(1, `rgb(${(200-prox*30)|0},20,0)`);
-    ctx.fillStyle = bg; ctx.fill();
-    if (e.homing) { ctx.strokeStyle='rgba(255,200,0,.6)'; ctx.lineWidth=1.5; ctx.stroke(); }
-  }
-
-  // Cursor
-  drawCursor();
-
-  // Particles
-  drawParticles();
-
-  // HUD
-  drawHUD();
+function drawEnemy(e) {
+  const prox=Math.max(0,1-Math.hypot(S.cursor.x-e.x,S.cursor.y-e.y)/200), beat=S.beatFlash>0, ps=1+Math.sin(e.pulse)*0.12+(beat?0.18:0);
+  const colors={plasma:{h:S.hue+20,s:100,l:60},void:{h:(S.hue+180)%360,s:80,l:50},solar:{h:30,s:100,l:60}};
+  const c=colors[e.type]||colors.plasma;
+  const aura=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.r*4); aura.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,${0.08+prox*0.18})`); aura.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*4*ps,0,Math.PI*2); ctx.fillStyle=aura; ctx.fill();
+  const mid=ctx.createRadialGradient(e.x,e.y,e.r*0.2,e.x,e.y,e.r*1.8); mid.addColorStop(0,`hsla(${c.h},${c.s}%,${c.l}%,0)`); mid.addColorStop(0.6,`hsla(${c.h},${c.s}%,${c.l}%,${0.1+prox*0.15})`); mid.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*1.8*ps,0,Math.PI*2); ctx.fillStyle=mid; ctx.fill();
+  const core=ctx.createRadialGradient(e.x-e.r*.25,e.y-e.r*.25,0,e.x,e.y,e.r*ps); core.addColorStop(0,`hsla(${c.h+30},100%,95%,1)`); core.addColorStop(0.4,`hsla(${c.h},${c.s}%,${c.l+15}%,1)`); core.addColorStop(1,`hsla(${c.h-20},${c.s}%,${c.l-10}%,0.9)`); ctx.beginPath(); ctx.arc(e.x,e.y,e.r*ps,0,Math.PI*2); ctx.fillStyle=core; ctx.fill();
+  if(e.homing){ ctx.beginPath(); ctx.arc(e.x,e.y,(e.r+4)*ps,0,Math.PI*2); ctx.strokeStyle=`hsla(50,100%,70%,${0.5+Math.sin(e.pulse*2)*0.3})`; ctx.lineWidth=1.5; ctx.stroke(); const ox=e.x+Math.cos(e.pulse*2)*(e.r+8),oy=e.y+Math.sin(e.pulse*2)*(e.r+8); ctx.beginPath(); ctx.arc(ox,oy,2,0,Math.PI*2); ctx.fillStyle='rgba(255,220,80,0.9)'; ctx.fill(); }
+  if(prox>0.5){ for(let i=0;i<3;i++){ const a=e.pulse*3+i*(Math.PI*2/3),d=e.r*1.4+Math.sin(e.pulse*4+i)*4,sx=e.x+Math.cos(a)*d,sy=e.y+Math.sin(a)*d; ctx.beginPath(); ctx.arc(sx,sy,1.5,0,Math.PI*2); ctx.fillStyle=`hsla(${c.h},100%,80%,${prox*0.8})`; ctx.fill(); } }
 }
 
 function drawCursor() {
-  const { x, y } = S.cursor;
-  const p = Math.sin(S.frame * 0.08) * 2;
-  const sc = S.beatFlash > 0 ? 1.3 : 1;
-  const onB = S.beatFlash > 0;
-
-  ctx.beginPath(); ctx.arc(x,y,(12+p)*sc,0,Math.PI*2);
-  ctx.strokeStyle = onB ? 'rgba(0,229,160,0.9)' : 'rgba(0,229,160,0.4)';
-  ctx.lineWidth = onB ? 2 : 1; ctx.stroke();
-
-  ctx.beginPath(); ctx.arc(x,y,5*sc,0,Math.PI*2);
-  ctx.fillStyle = '#00E5A0'; ctx.fill();
-
-  const len=onB?24:20, gap=onB?15:13;
-  ctx.strokeStyle = onB ? 'rgba(0,229,160,0.9)' : 'rgba(0,229,160,0.55)';
-  ctx.lineWidth = 1;
-  [[x-len,y,x-gap,y],[x+gap,y,x+len,y],[x,y-len,x,y-gap],[x,y+gap,x,y+len]]
-    .forEach(([x1,y1,x2,y2])=>{ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); });
+  const {x,y}=S.cursor,onB=S.beatFlash>0,sc=onB?1.3:1,p=Math.sin(S.frame*0.08)*2,h=S.hue;
+  const grd=ctx.createRadialGradient(x,y,0,x,y,(18+p)*sc); grd.addColorStop(0,`hsla(${h},100%,70%,0)`); grd.addColorStop(0.7,`hsla(${h},100%,70%,${onB?0.3:0.12})`); grd.addColorStop(1,'transparent'); ctx.beginPath(); ctx.arc(x,y,(18+p)*sc*1.8,0,Math.PI*2); ctx.fillStyle=grd; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,(12+p)*sc,0,Math.PI*2); ctx.strokeStyle=`hsla(${h},100%,70%,${onB?0.9:0.4})`; ctx.lineWidth=onB?2:1; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,(7+p*0.5)*sc,0,Math.PI*2); ctx.strokeStyle=`hsla(${h+40},100%,80%,${onB?0.6:0.2})`; ctx.lineWidth=1; ctx.stroke();
+  const coreG=ctx.createRadialGradient(x,y,0,x,y,5*sc); coreG.addColorStop(0,'white'); coreG.addColorStop(0.4,`hsla(${h},100%,85%,1)`); coreG.addColorStop(1,`hsla(${h},100%,60%,0)`); ctx.beginPath(); ctx.arc(x,y,5*sc,0,Math.PI*2); ctx.fillStyle=coreG; ctx.fill();
+  const len=onB?28:22,gap=onB?16:13; ctx.strokeStyle=`hsla(${h},100%,75%,${onB?0.9:0.55})`; ctx.lineWidth=onB?1.5:1;
+  [[x-len,y,x-gap,y],[x+gap,y,x+len,y],[x,y-len,x,y-gap],[x,y+gap,x,y+len]].forEach(([x1,y1,x2,y2])=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();});
+  if(onB){ for(let i=0;i<4;i++){ const a=(S.frame*0.1)+(i*Math.PI/2),ox=x+Math.cos(a)*20,oy=y+Math.sin(a)*20; ctx.beginPath(); ctx.arc(ox,oy,2,0,Math.PI*2); ctx.fillStyle=`hsla(${h+60},100%,90%,0.8)`; ctx.fill(); } }
+  // Trail
+  for(let i=0;i<S.trail.length;i++){ const pt=S.trail[i],a=pt.t*0.5*(1-i/S.trail.length),r=Math.max(0.5,(5-i*0.15)*pt.t); ctx.beginPath(); ctx.arc(pt.x,pt.y,r,0,Math.PI*2); ctx.fillStyle=`hsla(${h},100%,70%,${a})`; ctx.fill(); }
 }
 
 function drawParticles() {
-  for (const p of S.particles) {
-    const a = p.life/p.max;
-    ctx.beginPath(); ctx.arc(p.x,p.y,p.r*a,0,Math.PI*2);
-    ctx.fillStyle = `hsla(${p.hue},100%,60%,${a})`; ctx.fill();
+  for(const p of S.particles){
+    const a=p.life/p.max;
+    if(p.type==='ring'){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*(2-a),0,Math.PI*2); ctx.strokeStyle=`hsla(${p.hue},100%,70%,${a*0.8})`; ctx.lineWidth=1.5; ctx.stroke(); }
+    else { const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*a*2); g.addColorStop(0,`hsla(${p.hue},100%,90%,${a})`); g.addColorStop(1,`hsla(${p.hue},100%,60%,0)`); ctx.beginPath(); ctx.arc(p.x,p.y,p.r*a*2,0,Math.PI*2); ctx.fillStyle=g; ctx.fill(); }
   }
 }
 
 function drawHUD() {
-  const secs  = (S.time/60).toFixed(2);
-  const bSecs = (S.bestTime/60).toFixed(2);
-  const onB   = S.beatFlash > 0;
-
-  ctx.textAlign = 'left';
-  ctx.font = '16px "Press Start 2P", monospace';
-  ctx.fillStyle = '#00E5A0';
-  ctx.fillText(secs + 's', 18, 44);
-
-  ctx.font = '7px "Press Start 2P", monospace';
-  ctx.fillStyle = 'rgba(255,255,255,0.28)';
-  ctx.fillText('BEST ' + bSecs + 's', 18, 62);
-
-  ctx.textAlign = 'center';
-  ctx.font = onB ? '10px "Press Start 2P", monospace' : '8px "Press Start 2P", monospace';
-  ctx.fillStyle = onB ? '#00E5A0'
-    : S.level >= 5 ? '#FF4D00'
-    : S.level >= 3 ? '#FF9F0A'
-    : 'rgba(255,255,255,0.5)';
-  ctx.fillText('♩ ' + S.bpm + ' BPM', W/2, 28);
-
-  ctx.textAlign = 'right';
-  ctx.font = '8px "Press Start 2P", monospace';
-  ctx.fillStyle = S.level >= 5 ? '#FF4D00' : S.level >= 3 ? '#FF9F0A' : 'rgba(255,255,255,0.3)';
-  ctx.fillText('LV.' + S.level + '  x' + S.enemies.length, W-18, 44);
+  const secs=(S.time/60).toFixed(2),bSecs=(S.bestTime/60).toFixed(2),onB=S.beatFlash>0;
+  ctx.save(); ctx.shadowColor=`hsla(${S.hue},100%,70%,0.8)`; ctx.shadowBlur=12; ctx.textAlign='left'; ctx.font='bold 24px "Press Start 2P",monospace'; ctx.fillStyle=`hsl(${S.hue},100%,75%)`; ctx.fillText(secs+'s',20,44); ctx.restore();
+  ctx.textAlign='left'; ctx.font='8px "Press Start 2P",monospace'; ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.fillText('BEST '+bSecs+'s',20,62);
+  ctx.save(); if(onB){ctx.shadowColor=`hsl(${S.hue},100%,70%)`;ctx.shadowBlur=16;} ctx.textAlign='center'; ctx.font=(onB?'11px':'9px')+' "Press Start 2P",monospace'; ctx.fillStyle=onB?`hsl(${S.hue},100%,80%)`:S.level>=5?'#ff6644':S.level>=3?'#ffaa44':'rgba(255,255,255,0.4)'; ctx.fillText('♩ '+S.bpm+' BPM',W/2,26); ctx.restore();
+  ctx.save(); if(S.level>=3){ctx.shadowColor=S.level>=5?'#ff4422':'#ffaa22';ctx.shadowBlur=10;} ctx.textAlign='right'; ctx.font='9px "Press Start 2P",monospace'; ctx.fillStyle=S.level>=5?'#ff6644':S.level>=3?'#ffaa44':'rgba(255,255,255,0.3)'; ctx.fillText('LV.'+S.level+'  x'+S.enemies.length,W-18,44); ctx.restore();
 }
 
 function drawIdle() {
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fillRect(0,0,W,H);
-  ctx.textAlign = 'center';
-
-  ctx.font = 'bold 72px "Fredoka One", cursive';
-  ctx.fillStyle = '#F0EDE8';
-  ctx.fillText('CURSOR', W/2, H/2-62);
-  ctx.fillText('SURVIVOR', W/2, H/2-4);
-
-  ctx.font = '9px "Press Start 2P", monospace';
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.fillText('마우스로 빨간 원을 피하세요', W/2, H/2+28);
-  ctx.fillText('박자에 맞춰 원이 쏟아집니다', W/2, H/2+46);
-
-  if (S.bestTime > 0) {
-    ctx.font = '9px "Press Start 2P", monospace';
-    ctx.fillStyle = '#00E5A0';
-    ctx.fillText('BEST: ' + (S.bestTime/60).toFixed(2) + 's', W/2, H/2+68);
-  }
-
-  ctx.fillStyle = '#00E5A0';
-  ctx.fillRect(W/2-110, H/2+82, 220, 46);
-  ctx.font = '10px "Press Start 2P", monospace';
-  ctx.fillStyle = '#000';
-  ctx.fillText('▶  CLICK TO START', W/2, H/2+110);
+  const vig=ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.85); vig.addColorStop(0,'transparent'); vig.addColorStop(1,'rgba(0,0,0,0.7)'); ctx.fillStyle=vig; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.textAlign='center';
+  ctx.shadowColor=`hsla(${S.hue},100%,70%,1)`; ctx.shadowBlur=30; ctx.font='bold 64px "Fredoka One",cursive'; ctx.fillStyle='white'; ctx.fillText('CURSOR',W/2,H/2-60); ctx.fillText('SURVIVOR',W/2,H/2-4); ctx.shadowBlur=0;
+  ctx.font='9px "Press Start 2P",monospace'; ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.fillText('마우스로 빨간 원을 피하세요',W/2,H/2+28); ctx.fillText('박자에 맞춰 원이 쏟아집니다',W/2,H/2+46);
+  if(S.bestTime>0){ ctx.shadowColor=`hsl(${S.hue},100%,70%)`; ctx.shadowBlur=10; ctx.font='9px "Press Start 2P",monospace'; ctx.fillStyle=`hsl(${S.hue},100%,75%)`; ctx.fillText('BEST: '+(S.bestTime/60).toFixed(2)+'s',W/2,H/2+68); ctx.shadowBlur=0; }
+  const bx=W/2,by=H/2+(S.bestTime>0?100:80); ctx.shadowColor=`hsla(${S.hue},100%,60%,0.8)`; ctx.shadowBlur=20; ctx.fillStyle=`hsl(${S.hue},90%,55%)`; ctx.fillRect(bx-110,by-22,220,44); ctx.shadowBlur=0; ctx.font='10px "Press Start 2P",monospace'; ctx.fillStyle='white'; ctx.fillText('▶  CLICK TO START',bx,by+4);
+  ctx.restore();
 }
 
 function drawDead() {
-  drawParticles();
-  ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0,0,W,H);
-  ctx.textAlign = 'center';
-
-  ctx.font = 'bold 80px "Fredoka One", cursive';
-  ctx.fillStyle = '#FF4D00';
-  ctx.fillText('DEAD 💀', W/2, H/2-38);
-
-  ctx.font = '20px "Press Start 2P", monospace';
-  ctx.fillStyle = '#F0EDE8';
-  ctx.fillText((S.time/60).toFixed(2)+'s', W/2, H/2+10);
-
-  ctx.font = '9px "Press Start 2P", monospace';
-  if (S.time >= S.bestTime && S.bestTime > 0) {
-    ctx.fillStyle = '#FFD700'; ctx.fillText('★ NEW BEST! ★', W/2, H/2+36);
-  } else {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.fillText('BEST: '+(S.bestTime/60).toFixed(2)+'s', W/2, H/2+36);
-  }
-
-  ctx.fillStyle = '#F0EDE8';
-  ctx.fillRect(W/2-90, H/2+58, 180, 44);
-  ctx.font = '10px "Press Start 2P", monospace';
-  ctx.fillStyle = '#000';
-  ctx.fillText('↺  RETRY', W/2, H/2+85);
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.textAlign='center';
+  ctx.shadowColor='#ff2200'; ctx.shadowBlur=40; ctx.font='bold 72px "Fredoka One",cursive'; ctx.fillStyle='#ff4422'; ctx.fillText('DEAD 💀',W/2,H/2-48); ctx.shadowBlur=0;
+  ctx.shadowColor=`hsl(${S.hue},100%,70%)`; ctx.shadowBlur=16; ctx.font='20px "Press Start 2P",monospace'; ctx.fillStyle='white'; ctx.fillText((S.time/60).toFixed(2)+'s',W/2,H/2+8); ctx.shadowBlur=0;
+  ctx.font='9px "Press Start 2P",monospace';
+  if(S.time>=S.bestTime&&S.bestTime>0){ ctx.shadowColor='#ffdd00'; ctx.shadowBlur=12; ctx.fillStyle='#ffdd44'; ctx.fillText('★ NEW BEST! ★',W/2,H/2+36); ctx.shadowBlur=0; }
+  else { ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.fillText('BEST: '+(S.bestTime/60).toFixed(2)+'s',W/2,H/2+36); }
+  const bx=W/2,by=H/2+76; ctx.shadowColor='rgba(255,255,255,0.4)'; ctx.shadowBlur=12; ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillRect(bx-90,by-20,180,40); ctx.shadowBlur=0; ctx.font='10px "Press Start 2P",monospace'; ctx.fillStyle='#111'; ctx.fillText('↺  RETRY',bx,by+4);
+  ctx.restore();
 }
 
-// ── Loop ──────────────────────────────────────────────────────
-function loop() {
-  if (S.phase === 'running') update();
-  draw();
+canvas.addEventListener('mousemove',e=>{S.cursor.x=e.clientX;S.cursor.y=e.clientY;});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();S.cursor.x=e.touches[0].clientX;S.cursor.y=e.touches[0].clientY;},{passive:false});
+canvas.addEventListener('click',()=>{if(S.phase!=='running')startGame();});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();S.cursor.x=e.touches[0].clientX;S.cursor.y=e.touches[0].clientY;if(S.phase!=='running')startGame();},{passive:false});
+
+S.cursor.x=window.innerWidth/2; S.cursor.y=window.innerHeight/2;
+
+function loop(){
+  const shake=S.shakeX>0.5;
+  if(shake){ctx.save();ctx.translate(rand(-S.shakeX,S.shakeX),rand(-S.shakeY,S.shakeY));}
+  drawBackground();
+  if(S.beatFlash>0&&S.phase==='running'){ctx.fillStyle=`hsla(${S.hue},80%,60%,${(S.beatFlash/8)*0.07})`;ctx.fillRect(0,0,W,H);}
+  if(S.phase==='idle'){drawIdle();}
+  else {
+    // trail + enemies + cursor + particles
+    for(let i=0;i<S.trail.length;i++){ const p=S.trail[i],a=p.t*0.5*(1-i/S.trail.length),r=Math.max(0.5,(5-i*0.15)*p.t); ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fillStyle=`hsla(${S.hue},100%,70%,${a})`; ctx.fill(); }
+    for(const e of S.enemies) drawEnemy(e);
+    drawCursor(); drawParticles();
+    if(S.phase==='running') drawHUD();
+    if(S.phase==='dead') drawDead();
+  }
+  if(shake) ctx.restore();
+
+  if(S.phase==='running') update();
+  else if(S.phase==='dead'){
+    if(S.slowmo>0) update();
+    else {
+      for(const n of S.nebulaParticles){n.x+=n.vx;n.y+=n.vy;}
+      S.particles=S.particles.filter(p=>p.life>0);
+      for(const p of S.particles){p.x+=p.vx;p.y+=p.vy;p.vx*=0.91;p.vy*=0.91;p.life--;}
+    }
+  }
   requestAnimationFrame(loop);
 }
-
-S.cursor.x = typeof window !== 'undefined' ? window.innerWidth/2 : 400;
-S.cursor.y = typeof window !== 'undefined' ? window.innerHeight/2 : 300;
-
 loop();
 </script>
 </body>
